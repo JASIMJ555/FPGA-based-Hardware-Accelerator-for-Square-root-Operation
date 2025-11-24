@@ -1,1 +1,1 @@
-# FPGA-based-Hardware-Accelerator-for-Square-root-Operation
+Fpga implementation of cordic-based square root operation for parameter extraction of digital pre-distortion for power amplifiers
