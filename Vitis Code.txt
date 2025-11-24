@@ -1,0 +1,81 @@
+#define _MICROBLAZE_
+#include "xparameters.h"
+#include "xtmrctr.h"
+#include "xil_printf.h"
+#include "platform.h"
+#include <stdint.h>
+#include <math.h>
+
+#define CORDIC_BASE_ADDR   XPAR_PROJECTIP_V1_0_0_BASEADDR
+#define CORDIC_X_OFFSET    0x00
+#define CORDIC_Y_OFFSET    0x04
+#define CORDIC_CTRL_OFFSET 0x08
+#define CORDIC_RES_OFFSET  0x0C
+
+#define CORDIC_X_IN    (*(volatile uint32_t*)(CORDIC_BASE_ADDR + CORDIC_X_OFFSET))
+#define CORDIC_Y_IN    (*(volatile uint32_t*)(CORDIC_BASE_ADDR + CORDIC_Y_OFFSET))
+#define CORDIC_CTRL    (*(volatile uint32_t*)(CORDIC_BASE_ADDR + CORDIC_CTRL_OFFSET))
+#define CORDIC_RESULT  (*(volatile uint32_t*)(CORDIC_BASE_ADDR + CORDIC_RES_OFFSET))
+
+#ifndef XPAR_XTMRCTR_0_DEVICE_ID
+#define XPAR_XTMRCTR_0_DEVICE_ID 0
+#endif
+
+#define CORDIC_DONE_BIT_POS 18
+#define CORDIC_RESULT_MASK  0x3FFFF
+#define POLL_TIMEOUT_LOOPS  5000000U
+
+int main()
+{
+    init_platform();
+
+    XTmrCtr Timer;
+    XTmrCtr_Initialize(&Timer, XPAR_XTMRCTR_0_DEVICE_ID);
+    XTmrCtr_SetOptions(&Timer, 0, XTC_ENABLE_ALL_OPTION);
+
+    int a = 300, b = 500;
+    u32 sw_cycles = 0, hw_cycles = 0;
+
+    xil_printf("\r\nInputs: a = %d, b = %d\r\n\r\n", a, b);
+
+    XTmrCtr_Reset(&Timer, 0);
+    XTmrCtr_Start(&Timer, 0);
+
+    float sw = sqrtf(a*a + b*b);
+
+    XTmrCtr_Stop(&Timer, 0);
+    sw_cycles = XTmrCtr_GetValue(&Timer, 0);
+
+    xil_printf("Software Result = %d (x100)\r\n", (int)(sw * 100));
+    xil_printf("Software Cycles = %lu\r\n\r\n", sw_cycles);
+
+    CORDIC_CTRL = 0;
+    (void)CORDIC_RESULT;
+
+    XTmrCtr_Reset(&Timer, 0);
+    XTmrCtr_Start(&Timer, 0);
+
+    CORDIC_X_IN = (uint32_t)a;
+    CORDIC_Y_IN = (uint32_t)b;
+    CORDIC_CTRL = 1;
+
+    uint32_t loops, res, done = 0;
+    for (loops = 0; loops < POLL_TIMEOUT_LOOPS; loops++) {
+        res = CORDIC_RESULT;
+        done = (res >> CORDIC_DONE_BIT_POS) & 1;
+        if (done) break;
+    }
+
+    XTmrCtr_Stop(&Timer, 0);
+    hw_cycles = XTmrCtr_GetValue(&Timer, 0);
+
+    int32_t r18 = (int32_t)(res & CORDIC_RESULT_MASK);
+    if (r18 & (1 << 17))
+        r18 |= ~((1 << 18) - 1);
+
+    xil_printf("Hardware Result = %d (18-bit signed)\r\n", r18);
+    xil_printf("Hardware Cycles = %lu\r\n", hw_cycles);
+
+    cleanup_platform();
+    return 0;
+}
